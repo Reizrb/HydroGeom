@@ -3,6 +3,12 @@ venv/
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Packaging
+build/
+dist/
+*.egg-info/
 
 # Data files (too large for GitHub; get them from Zenodo, then build with prepare_data.py)
 *.parquet

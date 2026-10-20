@@ -1,23 +1,24 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the article below."
-title: "HydroGeomAPI"
+title: "HydroGeomAPI and HydroGeomKit"
 type: software
 authors:
   - family-names: Zarrabi
     given-names: Reihaneh
     affiliation: "University of Alabama"
 license: MIT
-version: "1.0.0"
 repository-code: "https://github.com/Reizrb/HydroGeomAPI"
 url: "https://conus-channel-geometry.onrender.com"
-abstract: "Web page and API serving machine-learning estimates of bankfull and mean-flow channel width and depth for NHDPlusV2.1 reaches and USGS gages across CONUS."
+abstract: "Web page, API, and Python package (HydroGeomKit) serving machine-learning estimates of bankfull and mean-flow channel width and depth for NHDPlusV2.1 reaches and USGS gages across CONUS, and computing cross-sectional area, wetted perimeter, and hydraulic radius."
 keywords:
   - "hydrology"
   - "channel geometry"
   - "bankfull"
   - "NHDPlus"
+  - "hydraulic geometry"
   - "API"
   - "web map"
+  - "Python"
 references:
   - type: data
     title: "Bankfull and mean-flow channel geometry for CONUS"

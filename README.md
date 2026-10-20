@@ -1,20 +1,30 @@
 <img src="assets/banner.png" alt="HydroGeomAPI" width="100%">
 
-# HydroGeomAPI
+# HydroGeomAPI and HydroGeomKit
 
 **Live at: https://conus-channel-geometry.onrender.com**
 
-A web page and API for downloading machine-learning estimates of bankfull and
-mean-flow channel width and depth for **2,691,339 NHDPlusV2.1 reaches** and
-**28,164 USGS gages** across the conterminous United States.
+A web page, an API, and a Python package (**HydroGeomKit**) for getting
+machine-learning estimates of bankfull and mean-flow channel width and depth for
+**2,691,339 NHDPlusV2.1 reaches** and **28,164 USGS gages** across the
+conterminous United States, and for computing cross-sectional area, wetted
+perimeter, and hydraulic radius.
 
 Instead of downloading the full 2.5 GB release, you can get just the reaches or
 gages you need, selected by ID, state, HUC2, HUC8, or an area on a map, as CSV,
-GeoJSON, or a zipped shapefile.
+GeoJSON, or a zipped shapefile, or straight into pandas or GeoPandas.
 
 The models and the dataset come from the
 [Bankfull-and-mean-flow-channel-geometry-for-CONUS](https://github.com/Reizrb/Bankfull-and-mean-flow-channel-geometry-for-CONUS)
 repository.
+
+**Contents:** [Web page](#using-the-web-page) ·
+[What you get](#what-you-get) ·
+[Python package](#using-the-python-package-hydrogeomkit) ·
+[API](#using-the-api-from-code) ·
+[Cite](#how-to-cite) ·
+[How it works](#how-it-works) ·
+[Run it yourself](#running-it-on-your-own-computer)
 
 ## Using the web page
 
@@ -53,7 +63,7 @@ satellite imagery, and the page has light and dark themes.
 | Shapefile | Values plus reach lines or gage points (zipped) | up to 50,000   |
 
 A CSV covers any single state or HUC2 region. For all of CONUS, download the full
-dataset from Zenodo (links below).
+dataset from [Zenodo](https://doi.org/10.5281/zenodo.19208847).
 
 ### Good to know
 
@@ -71,23 +81,141 @@ dataset from Zenodo (links below).
 - **Speed:** the service currently runs on a small free server. Most requests take
   a few seconds, and a whole state or HUC2 region can take a minute or more.
 
-## Using the Python package
+## Using the Python package (HydroGeomKit)
 
-The easiest way to use the data in Python is the
-[**HydroGeomKit**](https://github.com/Reizrb/HydroGeomKit) package (`hydrogeomkit`):
+**HydroGeomKit** (`hydrogeomkit`) gets the data straight into pandas or GeoPandas
+through the API, so there's nothing to download or unzip first. It also computes
+cross-section hydraulics for any widths and depths.
+
+### Install
 
 ```bash
-pip install "git+https://github.com/Reizrb/HydroGeomKit"
+pip install "git+https://github.com/Reizrb/HydroGeomAPI"
 ```
+
+To get reach lines and gage points as a GeoDataFrame, also install GeoPandas:
+
+```bash
+pip install geopandas
+```
+
+### Get channel width and depth
 
 ```python
 from hydrogeomkit import get_channel_geometry
 
-reaches = get_channel_geometry(huc8="03160112")                          # pandas table
-gages = get_channel_geometry(dataset="gage", state="AL", geometry=True)  # GeoDataFrame
+# All reaches in a HUC8 watershed, as a pandas table
+reaches = get_channel_geometry(huc8="03160112")
+
+# Specific reaches by COMID
+reaches = get_channel_geometry(comids=[18223451, 721640])
+
+# A whole state or HUC2 region (values only, up to 500,000 reaches)
+alabama = get_channel_geometry(state="AL")
+
+# USGS gages, by site number (as text, to keep leading zeros)
+gages = get_channel_geometry(site_nos=["02465000", "01206900"])
+
+# Gages in a state, with their points, as a GeoDataFrame
+gages = get_channel_geometry(dataset="gage", state="AL", geometry=True)
+
+# Reaches inside your own study area (a shapely geometry, or a GeoDataFrame in any CRS)
+import geopandas as gpd
+basin = gpd.read_file("my_basin.shp")
+reaches = get_channel_geometry(polygon=basin, geometry=True)
 ```
 
-See the [HydroGeomKit README](https://github.com/Reizrb/HydroGeomKit) for all options.
+Choose **one** way to select the area: `comids`, `site_nos`, `state`, `huc2`,
+`huc8`, `polygon`, or `conus=True` (gages only). The columns are the same as in
+[What you get](#what-you-get). Codes are kept as text, and records without a
+prediction have empty (NaN) width and depth.
+
+| `geometry=`     | Returns                              | Records per call |
+|-----------------|--------------------------------------|------------------|
+| `False` (default) | pandas DataFrame, values only      | up to 500,000    |
+| `True`          | GeoDataFrame with lines or points (EPSG:4269) | up to 50,000 |
+
+### Compute hydraulic geometry
+
+Three functions compute the cross-section geometry of a channel from its top width
+and depth, for a chosen channel shape:
+
+| Function | Returns | Units |
+|----------|---------|-------|
+| `xsec_area` | Cross-sectional area | m² |
+| `wetted_perimeter` | Wetted perimeter | m |
+| `hydraulic_radius` | Hydraulic radius (area / wetted perimeter) | m |
+
+```python
+from hydrogeomkit import get_channel_geometry, xsec_area, wetted_perimeter, hydraulic_radius
+
+df = get_channel_geometry(huc8="03160112")
+
+# Dingman's r (bank curvature)
+df["bnk_xsce_A"] = xsec_area(df["bnk_width"], df["bnk_depth"], shape="r", r=2)
+df["bnk_wet_p"] = wetted_perimeter(df["bnk_width"], df["bnk_depth"], shape="r", r=2)
+df["bnk_hyd_R"] = hydraulic_radius(df["bnk_width"], df["bnk_depth"], shape="r", r=2)
+
+# Bottom-to-top width ratio a, with a different value for each reach
+df["mf_xsce_A"] = xsec_area(df["mf_width"], df["mf_depth"], shape="a", a=df["a"])
+
+# Side slope z:1
+df["bnk_wet_p_z"] = wetted_perimeter(df["bnk_width"], df["bnk_depth"], shape="z", z=2)
+
+# Single values
+A = xsec_area(width=18.19, depth=1.23, shape="r", r=2)
+```
+
+#### Channel shape parameters
+
+Each function takes the top width (`width`, w<sub>bnk</sub>) and depth (`depth`,
+d<sub>bnk</sub>), plus one shape parameter. All three shapes assume a **symmetric
+channel**: both banks have the same shape and slope, and the deepest point is at the
+center of the channel.
+
+<table>
+<tr>
+<td align="center"><img src="assets/channel_shape_a.png" alt="Parameter a" height="220"><br><b>(a)</b> <code>shape="a"</code><br><sub>Zarrabi et al. (2026)</sub></td>
+<td align="center"><img src="assets/channel_shape_r.png" alt="Parameter r" height="220"><br><b>(b)</b> <code>shape="r"</code><br><sub>Dingman &amp; Afshari (2018)</sub></td>
+<td align="center"><img src="assets/channel_shape_z.png" alt="Parameter z" height="220"><br><b>(c)</b> <code>shape="z"</code></td>
+</tr>
+</table>
+
+- **`a`, bottom-to-top width ratio** (panel a; Zarrabi et al., 2026): the bottom width
+  divided by the top width, from 0 to 1. `a = 0` is a triangular channel, `a = 1` a
+  rectangular channel, and values in between are trapezoids.
+- **`r`, Dingman's shape parameter** (panel b; Dingman & Afshari, 2018): defines the
+  curvature of the banks. `r = 1` is triangular, `r = 2` parabolic, and higher values
+  approach rectangular. `r` must be at least 1.
+- **`z`, side slope** (panel c): banks with a slope of `z` horizontal to 1 vertical
+  (`z:1`). `z = 0` is rectangular. The banks must fit inside the top width; rows where
+  they don't get an empty result, with a warning.
+
+Widths and depths are in meters.
+
+#### Inputs and outputs
+
+- `width`, `depth`, and the shape parameter (`r`, `a`, or `z`) can each be a single
+  number, a list, an array, or a pandas column, so the shape parameter can change
+  from row to row.
+- A pandas column in gives a pandas column out, with the same index, so results can be
+  added straight to your table. A single number in gives a single number out.
+- Missing, zero, or negative widths or depths, or a missing shape parameter, give an
+  empty (NaN) result for that row only.
+- `r` below 1, `a` outside 0 to 1, or a negative `z` stops with an error.
+- The functions work on any widths and depths, not only data from the API, and need no
+  internet connection.
+
+### Package errors and options
+
+- `TooManyRecords`: the area is too big for one call. It has `.records` and
+  `.limit`. Use `geometry=False`, or a smaller area.
+- `ChannelGeometryError`: anything else, with the reason from the API.
+- The package waits and retries automatically if the server is starting up, and
+  waits up to 10 minutes for large areas (set `timeout=` to change this).
+- `status()` shows how many reaches and gages are available.
+- `base_url=` (or the `HYDROGEOMKIT_URL` environment variable) points the package
+  at another copy of the API.
 
 ## Using the API from code
 
@@ -192,6 +320,15 @@ If you use this data, please cite the paper and the dataset:
   [HydroShare](https://www.hydroshare.org/resource/1a2e115c212f4f4a80660f94339205e6/),
   CC-BY-4.0
 
+If you use the channel shape parameters, please also cite:
+
+- Dingman, S. L., & Afshari, S. (2018). Field verification of analytical at-a-station
+  hydraulic-geometry relations. *Journal of Hydrology*.
+- Zarrabi, R., Cohen, S., Pruitt, C., Baruah, A., McDermott, R., & Chen, Y. (2026).
+  Sensitivity of terrain-based flood inundation model (OWP HAND-FIM) predictions to
+  channel geometry: Insights from bathymetric adjustments of rating curves and stage
+  shift. *Journal of Hydrology*.
+
 ## How it works
 
 The API is a Python [FastAPI](https://fastapi.tiangolo.com/) application. The data
@@ -207,6 +344,9 @@ The service is packaged as a Docker container (see the `Dockerfile`) and current
 [Render](https://render.com/). To point it at another storage location (such as
 an S3 bucket), set the `CG_DATA_URL` environment variable to the folder that holds
 the two Parquet files.
+
+HydroGeomKit is a separate client in the `hydrogeomkit/` folder. It calls the same
+API over the internet and is not part of the Docker container.
 
 ## Running it on your own computer
 
@@ -233,7 +373,8 @@ python prepare_data.py reach
 To check that everything works:
 
 ```bash
-python test_api.py
+python test_api.py                 # the API
+pip install -e . pytest && pytest  # the Python package
 ```
 
 To try the API without the real data, `python make_sample_data.py` builds a small
@@ -244,12 +385,15 @@ fake reach file.
 | File                  | Purpose                                                        |
 |-----------------------|----------------------------------------------------------------|
 | `app.py`              | The API                                                        |
-| `static/`             | The web page (`index.html`) and logo                           |
+| `static/`             | The web page (`index.html`, `about.html`) and logo             |
 | `prepare_data.py`     | Builds `reaches.parquet` and `gages.parquet`, sorted by HUC8   |
 | `make_sample_data.py` | Builds a small fake reach file for testing                     |
 | `test_api.py`         | Checks every request type                                      |
 | `requirements.txt`    | Python packages the API needs                                  |
 | `Dockerfile`          | Builds the container used for hosting                          |
+| `hydrogeomkit/`       | The HydroGeomKit Python package                                |
+| `tests/`              | Tests for the package's hydraulic geometry functions           |
+| `pyproject.toml`      | Package settings used by `pip install`                         |
 
 ## License
 
@@ -257,10 +401,7 @@ Code: [MIT](LICENSE). Data: CC-BY-4.0 (see the Zenodo record).
 
 ## Related repositories
 
-These three repositories work together:
-
 | Repository | What it does |
 |------------|--------------|
 | [Bankfull-and-mean-flow-channel-geometry-for-CONUS](https://github.com/Reizrb/Bankfull-and-mean-flow-channel-geometry-for-CONUS) | The research: model development, evaluation, and the dataset |
-| [HydroGeomKit](https://github.com/Reizrb/HydroGeomKit) | Python package: get the data and compute channel hydraulics |
-| [HydroGeomAPI](https://github.com/Reizrb/HydroGeomAPI) | The web page and API that serve the data |
+| [HydroGeomAPI](https://github.com/Reizrb/HydroGeomAPI) | This repository: the web page, API, and HydroGeomKit Python package |
