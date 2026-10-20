@@ -114,7 +114,11 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
 
 
-STATIC = HERE / "static"
+# The web page (HydroGeomSite) lives in the hydrogeomsite folder next to this one.
+_SITE_DIRS = [HERE.parent / "hydrogeomsite", HERE / "hydrogeomsite"]
+STATIC = next((d for d in _SITE_DIRS if d.exists()), _SITE_DIRS[0])
+if not STATIC.exists():
+    print(f"WARNING: web page folder not found (looked in {_SITE_DIRS}); serving the API only.")
 if STATIC.exists():
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

@@ -1,10 +1,10 @@
-<img src="assets/banner.png" alt="HydroGeomAPI" width="100%">
+<img src="assets/banner.png" alt="HydroGeom" width="100%">
 
-# HydroGeomAPI and HydroGeomKit
+# HydroGeom
 
 **Live at: https://conus-channel-geometry.onrender.com**
 
-A web page, an API, and a Python package (**HydroGeomKit**) for getting
+A web page, an API, and a Python package for getting
 machine-learning estimates of bankfull and mean-flow channel width and depth for
 **2,691,339 NHDPlusV2.1 reaches** and **28,164 USGS gages** across the
 conterminous United States, and for computing cross-sectional area, wetted
@@ -17,6 +17,12 @@ GeoJSON, or a zipped shapefile, or straight into pandas or GeoPandas.
 The models and the dataset come from the
 [Bankfull-and-mean-flow-channel-geometry-for-CONUS](https://github.com/Reizrb/Bankfull-and-mean-flow-channel-geometry-for-CONUS)
 repository.
+
+| Component | Folder | What it does |
+|-----------|--------|--------------|
+| **HydroGeomSite** | [`hydrogeomsite/`](hydrogeomsite) | The web page: pick an area on a map and download |
+| **HydroGeomAPI** | [`hydrogeomapi/`](hydrogeomapi) | The API that serves the data |
+| **HydroGeomKit** | [`hydrogeomkit/`](hydrogeomkit) | The Python package: get the data and compute channel hydraulics |
 
 **Contents:** [Web page](#using-the-web-page) ·
 [What you get](#what-you-get) ·
@@ -90,7 +96,7 @@ cross-section hydraulics for any widths and depths.
 ### Install
 
 ```bash
-pip install "git+https://github.com/Reizrb/HydroGeomAPI"
+pip install "git+https://github.com/Reizrb/HydroGeom"
 ```
 
 To get reach lines and gage points as a GeoDataFrame, also install GeoPandas:
@@ -345,12 +351,13 @@ The service is packaged as a Docker container (see the `Dockerfile`) and current
 an S3 bucket), set the `CG_DATA_URL` environment variable to the folder that holds
 the two Parquet files.
 
-HydroGeomKit is a separate client in the `hydrogeomkit/` folder. It calls the same
-API over the internet and is not part of the Docker container.
+The Docker container holds HydroGeomAPI and HydroGeomSite. HydroGeomKit is a separate
+client: it calls the same API over the internet and is not part of the container.
 
 ## Running it on your own computer
 
 ```bash
+cd hydrogeomapi
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -363,7 +370,7 @@ from Hugging Face automatically.
 To build the data files yourself, download the reach shapefile and gage CSV from
 the latest Zenodo record, plus the
 [Census state boundaries](https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_state_500k.zip),
-into the repository folder, then run (the reach build takes 10–30 minutes):
+into the `hydrogeomapi/` folder, then run from there (the reach build takes 10–30 minutes):
 
 ```bash
 python prepare_data.py gage
@@ -373,27 +380,27 @@ python prepare_data.py reach
 To check that everything works:
 
 ```bash
-python test_api.py                 # the API
-pip install -e . pytest && pytest  # the Python package
+cd hydrogeomapi && python test_api.py                        # the API
+cd .. && pip install -e . pytest && python -m pytest hydrogeomkit/tests  # the Python package
 ```
 
 To try the API without the real data, `python make_sample_data.py` builds a small
-fake reach file.
+fake reach file (run it inside `hydrogeomapi/`).
 
 ## Files
 
-| File                  | Purpose                                                        |
-|-----------------------|----------------------------------------------------------------|
-| `app.py`              | The API                                                        |
-| `static/`             | The web page (`index.html`, `about.html`) and logo             |
-| `prepare_data.py`     | Builds `reaches.parquet` and `gages.parquet`, sorted by HUC8   |
-| `make_sample_data.py` | Builds a small fake reach file for testing                     |
-| `test_api.py`         | Checks every request type                                      |
-| `requirements.txt`    | Python packages the API needs                                  |
-| `Dockerfile`          | Builds the container used for hosting                          |
-| `hydrogeomkit/`       | The HydroGeomKit Python package                                |
-| `tests/`              | Tests for the package's hydraulic geometry functions           |
-| `pyproject.toml`      | Package settings used by `pip install`                         |
+| File                         | Purpose                                                        |
+|------------------------------|----------------------------------------------------------------|
+| `hydrogeomsite/`             | HydroGeomSite: the web page (`index.html`, `about.html`) and logo |
+| `hydrogeomapi/app.py`        | HydroGeomAPI: the API                                          |
+| `hydrogeomapi/prepare_data.py` | Builds `reaches.parquet` and `gages.parquet`, sorted by HUC8 |
+| `hydrogeomapi/make_sample_data.py` | Builds a small fake reach file for testing             |
+| `hydrogeomapi/test_api.py`   | Checks every request type                                      |
+| `hydrogeomapi/requirements.txt` | Python packages the API needs                               |
+| `hydrogeomkit/`              | HydroGeomKit: the Python package, with its tests in `tests/`   |
+| `pyproject.toml`             | Package settings used by `pip install`                         |
+| `Dockerfile`                 | Builds the container (API + web page) used for hosting         |
+| `assets/`                    | Images used in this README                                     |
 
 ## License
 
@@ -404,4 +411,4 @@ Code: [MIT](LICENSE). Data: CC-BY-4.0 (see the Zenodo record).
 | Repository | What it does |
 |------------|--------------|
 | [Bankfull-and-mean-flow-channel-geometry-for-CONUS](https://github.com/Reizrb/Bankfull-and-mean-flow-channel-geometry-for-CONUS) | The research: model development, evaluation, and the dataset |
-| [HydroGeomAPI](https://github.com/Reizrb/HydroGeomAPI) | This repository: the web page, API, and HydroGeomKit Python package |
+| [HydroGeom](https://github.com/Reizrb/HydroGeom) | This repository: HydroGeomSite, HydroGeomAPI, and HydroGeomKit |
