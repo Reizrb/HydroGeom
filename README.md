@@ -2,6 +2,8 @@
 
 # HydroGeom
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23520185.svg)](https://doi.org/10.5281/zenodo.23520185)
+
 **Live at: https://conus-channel-geometry.onrender.com**
 
 A web page, an API, and a Python package for getting
