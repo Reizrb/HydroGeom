@@ -30,8 +30,10 @@ import io
 import shutil
 import json
 import os
+import re
 import tempfile
 import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -344,6 +346,72 @@ _MEDIA = {"csv": "text/csv", "geojson": "application/geo+json",
           "shapefile": "application/zip"}
 
 
+# Map data for a whole state or HUC2 region is also the same for everyone. It is saved
+# (compressed) the first time it is asked for, or ahead of time by prepare_map_cache().
+_LOCKS_GUARD = threading.Lock()
+_MAP_LOCKS: dict = {}
+
+
+def _lock_for(path: Path) -> threading.Lock:
+    with _LOCKS_GUARD:
+        return _MAP_LOCKS.setdefault(str(path), threading.Lock())
+
+
+def _map_cached(ds: dict, col: str, code: str, name: str):
+    """Map data for one state or HUC2 region: built once, then reused."""
+    _check_size(ds, f"{col} = ?", [code], "map")      # the map limit still applies
+    cached = CACHE_DIR / "map" / f"{name}_{col}_{code}.geojson.gz"
+    with _lock_for(cached):
+        if not cached.exists():
+            built = _stream(ds, (f"{col} = ?", [code]), "geojson", name,
+                            for_map=True, large_area=True)
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            part = cached.with_name(f"{cached.name}.{os.getpid()}.part")
+            shutil.move(built.path, part)
+            part.replace(cached)
+            shutil.rmtree(Path(built.path).parent, ignore_errors=True)
+    return FileResponse(cached, media_type="application/geo+json", filename=f"{name}.geojson",
+                        headers={"Content-Encoding": "gzip"})
+
+
+def _map_cache_request(ds: dict, req, rt: str):
+    """Use the saved map data when the request is a whole state or HUC2 region."""
+    if rt == "state" and req.state and re.fullmatch(r"[A-Za-z]{2}", req.state.strip()):
+        return _map_cached(ds, "state", req.state.strip().upper(), _outname(req.dataset))
+    if rt == "huc2" and req.huc2 and re.fullmatch(r"\d{1,2}", req.huc2.strip()):
+        return _map_cached(ds, "huc2", req.huc2.strip().zfill(2), _outname(req.dataset))
+    return None
+
+
+def prepare_map_cache():
+    """Build the map data for every state and HUC2 region ahead of time, so nobody waits.
+    Run on the server after the data files change (update.sh --clear-cache does this)."""
+    for dsname, ds in DATASETS.items():
+        if not _available(ds):
+            continue
+        name = _outname(dsname)
+        for col in ("huc2", "state"):
+            try:
+                codes = [r[0] for r in con().execute(
+                    f"SELECT DISTINCT {col} FROM read_parquet('{ds['path']}') "
+                    f"WHERE {col} IS NOT NULL ORDER BY 1").fetchall()]
+            except Exception as err:
+                print(f"  {name}: could not list {col} codes ({err})", flush=True)
+                continue
+            for code in codes:
+                if not re.fullmatch(r"[A-Za-z0-9]{1,4}", str(code)):
+                    continue
+                t = time.time()
+                try:
+                    _map_cached(ds, col, str(code), name)
+                    print(f"  {name} {col} {code}: ready ({time.time() - t:.0f} s)", flush=True)
+                except TooBig as err:
+                    print(f"  {name} {col} {code}: skipped, {err.n:,} records is over the "
+                          f"map limit of {err.limit:,}", flush=True)
+                except HTTPException as err:
+                    print(f"  {name} {col} {code}: skipped ({err.detail})", flush=True)
+
+
 def _conus_cached(ds: dict, fmt: str, name: str):
     _check_size(ds, "", [], fmt)          # same size rules as any other request
     fmt = fmt.lower()
@@ -395,6 +463,10 @@ def _extract(req: ExtractRequest):
     _check_format(req.format)
     rt = req.request_type.lower()
     size_fmt = "map" if req.for_map and req.format.lower() == "geojson" else req.format
+    if size_fmt == "map" and rt in ("state", "huc2"):
+        saved = _map_cache_request(ds, req, rt)
+        if saved is not None:
+            return saved
     if rt == "conus":
         if size_fmt == "map":
             _check_size(ds, "", [], size_fmt)
