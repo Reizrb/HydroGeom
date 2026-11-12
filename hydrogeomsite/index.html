@@ -342,17 +342,8 @@ details { border-top:0; background:#fff; border-radius:16px; padding:14px 16px; 
   summary { font-size: 15px; }
   pre { font-size: 12.5px; }
   .foot { font-size: 13.5px; }
-  /* partner logos: one white strip, so every logo sits on the background it was made for */
-  .partners {
-    display: flex; align-items: center; justify-content: space-around; gap: 12px;
-    background: #fff; border-radius: 12px; padding: 12px 14px;
-  }
-  .partners a { display: block; border-radius: 6px; transition: opacity .15s; }
-  .partners a:hover { opacity: .8; }
-  .partners a:focus-visible { outline: 2px solid #2E6A8C; outline-offset: 3px; }
-  .partners img { display: block; height: 44px; width: auto; }
-  .partners .ua img { height: 30px; }
-  .partners .sdml img { border-radius: 4px; }
+  #show[hidden] + #map-hint { display: none; }
+  #map-hint { margin: -4px 0 0; }
 </style>
 </head>
 <body>
@@ -430,6 +421,7 @@ details { border-top:0; background:#fff; border-radius:16px; padding:14px 16px; 
   <div class="actions">
     <button class="primary" id="go">Download data</button>
     <button class="secondary" id="show" hidden>Show these on the map</button>
+    <p class="hint" id="map-hint"></p>
     <p class="status" id="status" role="status" aria-live="polite"></p>
   </div>
 
@@ -445,11 +437,6 @@ details { border-top:0; background:#fff; border-radius:16px; padding:14px 16px; 
     <a href="https://www.hydroshare.org/resource/1a2e115c212f4f4a80660f94339205e6/" target="_blank" rel="noopener">HydroShare</a> (CC-BY-4.0).
     Code: <a href="https://github.com/Reizrb/HydroGeom" target="_blank" rel="noopener">GitHub</a>.
   </p>
-  <nav class="partners" aria-label="Partners">
-    <a href="https://ciroh.ua.edu/" target="_blank" rel="noopener" title="CIROH"><img src="/static/ciroh_logo.png" alt="CIROH" height="44"></a>
-    <a class="sdml" href="https://sdml.ua.edu/" target="_blank" rel="noopener" title="Surface Dynamics Modeling Lab"><img src="/static/sdml_logo.png" alt="Surface Dynamics Modeling Lab" height="44"></a>
-    <a class="ua" href="https://www.ua.edu/" target="_blank" rel="noopener" title="The University of Alabama"><img src="/static/ua_logo.png" alt="The University of Alabama" height="30"></a>
-  </nav>
 </main>
 
 <div class="mapwrap">
@@ -510,7 +497,7 @@ const results = L.geoJSON(null, {
     const p = f.properties, fmt = v => (v == null || Number.isNaN(v)) ? "no prediction" : `${(+v).toFixed(2)} m`;
     const id = p.site_no ? `Gage ${p.site_no}<br>${p.station_nm || ""}`
                          : `COMID ${p.comid}<br>Stream order ${p.stream_order ?? "unknown"}`;
-    layer.bindPopup(`<strong>${id}</strong><br>Bankfull width: ${fmt(p.bnk_width)}<br>Bankfull depth: ${fmt(p.bnk_depth)}` +
+    layer.bindPopup(() => `<strong>${id}</strong><br>Bankfull width: ${fmt(p.bnk_width)}<br>Bankfull depth: ${fmt(p.bnk_depth)}` +
                     `<br>Mean-flow width: ${fmt(p.mf_width)}<br>Mean-flow depth: ${fmt(p.mf_depth)}`);
   }
 }).addTo(map);
@@ -594,15 +581,18 @@ open("channel_geometry.${ext}", "wb").write(r.content)`;
 
 function setStatus(msg, kind) { const s = $("status"); s.innerHTML = msg; s.className = "status " + (kind || ""); }
 
-async function send(fmt) {
+async function send(fmt, forMap = false) {
   const a = $("area").value;
   if (a === "shapefile") {
     const f = $("shp").files[0];
     if (!f) throw new Error("Choose a zipped shapefile first.");
     const fd = new FormData(); fd.append("file", f); fd.append("format", fmt); fd.append("dataset", dataset());
+    if (forMap) fd.append("for_map", "true");
     return fetch("/extract/shapefile", { method: "POST", body: fd });
   }
-  return fetch("/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildBody(fmt)) });
+  const body = buildBody(fmt);
+  if (forMap) body.for_map = true;
+  return fetch("/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 async function readError(r) {
@@ -618,7 +608,19 @@ async function readError(r) {
 }
 
 let lastRequestOk = false;
+fetch("/limits").then(r => r.json()).then(l => {
+  $("map-hint").textContent = `The map shows up to ${l.map.toLocaleString()} reaches or gages at once. ` +
+    "Large areas can take a few seconds to appear.";
+}).catch(() => {});
+
 $("go").addEventListener("click", async () => {
+  if ($("area").value === "conus") {
+    // all-of-CONUS files are large (up to 2.2 GB): let the browser save them straight to disk
+    $("show").hidden = true;
+    window.location.href = `/download/conus?dataset=${dataset()}&format=${format()}`;
+    setStatus("Your download has started. Follow its progress in your browser's downloads.", "ok");
+    return;
+  }
   const btn = $("go"); btn.disabled = true; $("show").hidden = true;
   const t0 = performance.now();
   const timer = setInterval(() => setStatus(`Preparing your file… ${Math.round((performance.now() - t0) / 1000)} s`, ""), 1000);
@@ -646,8 +648,7 @@ $("go").addEventListener("click", async () => {
 $("show").addEventListener("click", async () => {
   const btn = $("show"); btn.disabled = true; setStatus("Loading onto the map…", "");
   try {
-    const r = await send("geojson");
-    if (r.status === 413) throw new Error("Too many records to show on the map (the limit is 50,000). Try a smaller area, like a HUC8.");
+    const r = await send("geojson", true);
     if (!r.ok) throw new Error(await readError(r));
     const gj = await r.json();
     // draw small streams first so the big rivers sit on top of them
