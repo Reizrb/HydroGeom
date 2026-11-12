@@ -483,15 +483,24 @@ hydro.addTo(map);
 L.control.layers(basemaps, { "Rivers and lakes (NHD)": hydro }, { position: "topright" }).addTo(map);
 
 const drawn = new L.FeatureGroup().addTo(map);
-// Line width grows linearly with stream order: order 1 -> 0.4 px ... order 9 -> 4 px
-// (the same 1:10 ratio as 0.1 -> 1). Unknown order draws as the thinnest line.
-const MIN_W = 0.4, MAX_W = 4.0;
-function orderWidth(order) {
-  const o = Math.min(Math.max(Number(order) || 1, 1), 9);
-  return MIN_W + (o - 1) / 8 * (MAX_W - MIN_W);
+// Reach lines: small streams thin, light, and see-through; large rivers wider and darker.
+// Lines get thinner as you zoom out, so a whole state or HUC2 region stays readable.
+// Unknown stream order draws as the smallest stream.
+const ORDER_W = [0.8, 1.0, 1.3, 1.7, 2.2, 2.8, 3.4, 4.0, 4.6];      // order 1 ... 9, zoomed in
+function zoomScale(z) { return z <= 5 ? 0.3 : z <= 6 ? 0.38 : z <= 7 ? 0.5 : z <= 8 ? 0.65 : z <= 10 ? 0.8 : 1; }
+function reachStyle(f) {
+  const o = Math.min(Math.max(Number(f.properties.stream_order) || 1, 1), 9);
+  const z = map.getZoom(), big = (o - 1) / 8;                         // 0 small stream ... 1 large river
+  const boost = z >= 9 ? 0.3 : z >= 7 ? 0.12 : 0;                     // fewer lines on screen: show them more
+  return { color: o <= 2 ? "#6AA8D3" : o <= 4 ? "#3A84B5" : "#1B5A86",
+           weight: ORDER_W[o - 1] * zoomScale(z),
+           opacity: Math.min(1, 0.5 + 0.45 * big + boost), lineCap: "round" };
 }
+map.on("zoomend", () => {
+  results.eachLayer(l => { if (l.feature.geometry.type !== "Point") l.setStyle(reachStyle(l.feature)); });
+});
 const results = L.geoJSON(null, {
-  style: (f) => ({ color: "#2B6F97", weight: orderWidth(f.properties.stream_order), opacity: 0.9, lineCap: "round" }),
+  style: reachStyle,
   pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4.5, color: "#FFFFFF", fillColor: "#E4572E", fillOpacity: 1, weight: 1.3 }),
   onEachFeature: (f, layer) => {
     const p = f.properties, fmt = v => (v == null || Number.isNaN(v)) ? "no prediction" : `${(+v).toFixed(2)} m`;
@@ -654,6 +663,7 @@ $("show").addEventListener("click", async () => {
     // draw small streams first so the big rivers sit on top of them
     gj.features.sort((a, b) => (a.properties.stream_order || 0) - (b.properties.stream_order || 0));
     results.clearLayers(); results.addData(gj);
+    if (map.hasLayer(hydro)) map.removeLayer(hydro);   // avoid drawing the same rivers twice
     if (results.getLayers().length) map.fitBounds(results.getBounds(), { padding: [30, 30] });
     note(`${gj.features.length.toLocaleString()} ${dataset() === "reach" ? "reaches" : "gages"} shown. Click one for its width and depth.`);
     setStatus("Shown on the map.", "ok");
