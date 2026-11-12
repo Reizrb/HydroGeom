@@ -73,6 +73,13 @@
   html[data-theme=dark] .theme-toggle { color: #CBBE7F; }
   html[data-theme=dark] .theme-toggle .i-sun { display: block; }
   html[data-theme=dark] .theme-toggle .i-moon { display: none; }
+  .funding { display: flex; align-items: center; gap: 18px; }
+  .funding img { display: block; width: 72px; height: 72px; flex: none; }
+  .funding p { margin: 0; }
+  .funding .on-dark { display: none; }
+  html[data-theme=dark] .funding .on-light { display: none; }
+  html[data-theme=dark] .funding .on-dark { display: block; }
+  @media (max-width: 600px) { .funding img { width: 56px; height: 56px; } }
   footer { text-align: center; color: var(--muted); font-size: 14px; margin-top: 26px; }
   @media (max-width: 600px) { section { padding: 18px 16px; } header h1 { font-size: 21px; } }
 </style>
@@ -99,6 +106,7 @@
     <a href="#use">How to access it</a>
     <a href="#notes">Good to know</a>
     <a href="#cite">How to cite</a>
+    <a href="#funding">Funding</a>
     <a href="#contact">Contact</a>
   </nav>
 
@@ -241,6 +249,14 @@
       Dataset: <a href="https://doi.org/10.5281/zenodo.19208847" target="_blank" rel="noopener">https://doi.org/10.5281/zenodo.19208847</a>
     </div>
     <p>The data are licensed under <strong>CC-BY-4.0</strong>, and the code under the MIT license.</p>
+  </section>
+
+  <section id="funding">
+    <h2>Funding</h2>
+    <div class="funding">
+      <a href="https://ciroh.ua.edu/" target="_blank" rel="noopener"><img class="on-light" src="/static/ciroh_logo.png" alt="CIROH" width="72" height="72"><img class="on-dark" src="/static/ciroh_logo_dark.png" alt="CIROH" width="72" height="72"></a>
+      <p>Funding for this project was provided by the National Oceanic &amp; Atmospheric Administration (NOAA), awarded to the Cooperative Institute for Research to Operations in Hydrology (CIROH) through the Cooperative Agreement with The University of Alabama (NA22NWS4320003).</p>
+    </div>
   </section>
 
   <section id="contact" class="contact">
