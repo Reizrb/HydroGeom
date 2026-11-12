@@ -29,6 +29,7 @@ import shutil
 import json
 import os
 import tempfile
+import threading
 import zipfile
 from pathlib import Path
 
@@ -63,11 +64,15 @@ def _data_path(filename: str) -> str:
 
 DATASET_CRS = "EPSG:4269"      # NAD83, the NHDPlusV2.1 CRS (both files are built in it)
 MAX_SYNC_ROWS = 50_000         # shapefile / GeoJSON (with line shapes): records per request
-MAX_CSV_ROWS = 500_000         # CSV (numbers only, no line shapes): covers every state and HUC2
+MAX_CSV_ROWS = 3_000_000         # CSV (numbers only, no line shapes): covers every state and HUC2
+
+
+MAX_SHP_ROWS = 3_000_000         # shapefile (line shapes, zipped): most states and HUC2s
 
 
 def _limit(fmt: str) -> int:
-    return MAX_CSV_ROWS if (fmt or "csv").lower() == "csv" else MAX_SYNC_ROWS
+    f = (fmt or "csv").lower()
+    return {"csv": MAX_CSV_ROWS, "shapefile": MAX_SHP_ROWS}.get(f, MAX_SYNC_ROWS)
 ZENODO_URL = "https://zenodo.org/records/19208847"
 
 
@@ -136,8 +141,8 @@ def home():
 # files (their layout, which parts hold which HUCs) is cached between requests
 # instead of being downloaded again from Hugging Face every time.
 _DB = duckdb.connect()
-_DB.execute("PRAGMA threads=1")      # the free server has a tenth of a CPU; leave room for /health
-_DB.execute("SET memory_limit = '256MB'")        # the free server has 512 MB in total
+_DB.execute("PRAGMA threads=2")      # the free server has a tenth of a CPU; leave room for /health
+_DB.execute("SET memory_limit = '2GB'")        # the free server has 512 MB in total
 _DB.execute(f"SET temp_directory = '{tempfile.gettempdir()}/duckdb_spill'")
 for _setting in ("SET enable_object_cache = true",
                  "SET enable_http_metadata_cache = true"):
@@ -174,7 +179,12 @@ def about():
 
 def con():
     """A cursor on the shared database (safe to use from several requests at once)."""
-    return _DB.cursor()
+    c = _DB.cursor()
+    try:
+        c.execute("SET geometry_always_xy = true")   # DuckDB 2.x: lon/lat axis order for GDAL
+    except Exception:                                # older DuckDB has no such setting
+        pass
+    return c
 
 
 # ------------------------------------------------------------------ request model
@@ -273,6 +283,31 @@ def _stream(ds: dict, query: tuple, fmt: str, name: str = "reaches"):
     return FileResponse(out, media_type=media, filename=out.name, background=cleanup)
 
 
+# ------------------------------------------------------------------ CONUS cache
+# An all-of-CONUS file is the same for everyone, so it is built once and then reused.
+# Delete the files in CACHE_DIR whenever the data files change.
+CACHE_DIR = Path(os.environ.get("CG_CACHE_DIR", "/app/cache"))
+_CACHE_LOCK = threading.Lock()
+_EXT = {"csv": "csv", "geojson": "geojson", "shapefile": "zip"}
+_MEDIA = {"csv": "text/csv", "geojson": "application/geo+json",
+          "shapefile": "application/zip"}
+
+
+def _conus_cached(ds: dict, fmt: str, name: str):
+    _check_size(ds, "", [], fmt)          # same size rules as any other request
+    fmt = fmt.lower()
+    cached = CACHE_DIR / f"conus_{name}_{fmt}.{_EXT[fmt]}"
+    with _CACHE_LOCK:                     # one build at a time; others wait, then reuse it
+        if not cached.exists():
+            built = _stream(ds, ("", []), fmt, name)
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            part = cached.with_name(cached.name + ".part")
+            shutil.move(built.path, part)
+            part.replace(cached)
+            shutil.rmtree(Path(built.path).parent, ignore_errors=True)
+    return FileResponse(cached, media_type=_MEDIA[fmt], filename=f"{name}.{_EXT[fmt]}")
+
+
 # ------------------------------------------------------------------ endpoints
 def _too_big(err: TooBig, what: str) -> HTTPException:
     """413 answer that tells the user where to get large areas instead."""
@@ -303,7 +338,7 @@ def _extract(req: ExtractRequest):
     _check_format(req.format)
     rt = req.request_type.lower()
     if rt == "conus":
-        gdf = _fetch_by_filter(ds, "", [], req.format)
+        return _conus_cached(ds, req.format, _outname(req.dataset))
     elif rt in ("ids", "comids"):
         raw = req.ids or ([str(c) for c in req.comids] if req.comids else None)
         if not raw:
