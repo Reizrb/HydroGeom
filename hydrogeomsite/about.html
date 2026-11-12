@@ -190,10 +190,10 @@
     </p>
     <div class="tablewrap">
     <table>
-      <tr><th>Format</th><th>Contents</th><th>Records per download</th></tr>
-      <tr><td>CSV</td><td>Values only, no line shapes</td><td>up to 500,000</td></tr>
-      <tr><td>GeoJSON</td><td>Values plus reach lines or gage points</td><td>up to 50,000</td></tr>
-      <tr><td>Shapefile</td><td>Values plus reach lines or gage points (zipped)</td><td>up to 50,000</td></tr>
+      <tr><th>Format</th><th>Contents</th><th>Area per download</th></tr>
+      <tr><td>CSV</td><td>Values only, no line shapes</td><td>Any area, up to all of CONUS (about 220 MB for all reaches)</td></tr>
+      <tr><td>GeoJSON</td><td>Values plus reach lines or gage points</td><td>Any area, up to all of CONUS (about 2.8 GB for all reaches; not zipped)</td></tr>
+      <tr><td>Shapefile</td><td>Values plus reach lines or gage points (zipped)</td><td>Any area, up to all of CONUS (about 1 GB for all reaches)</td></tr>
     </table>
     </div>
     <h3>Python</h3>
@@ -212,8 +212,9 @@
     </p>
     <h3>The full dataset</h3>
     <p>
-      To download everything at once, use
-      <a href="https://doi.org/10.5281/zenodo.19208847" target="_blank" rel="noopener">Zenodo</a> or
+      To download everything at once, choose <strong>All of CONUS</strong> on the
+      <a href="/">main page</a>. The archived release, which is the version to cite, is on
+      <a href="https://doi.org/10.5281/zenodo.19208847" target="_blank" rel="noopener">Zenodo</a> and
       <a href="https://www.hydroshare.org/resource/1a2e115c212f4f4a80660f94339205e6/" target="_blank" rel="noopener">HydroShare</a>.
     </p>
   </section>
@@ -231,8 +232,14 @@
       <li>Geometries are in <strong>NAD83 (EPSG:4269)</strong>, the NHDPlusV2.1 coordinate system.</li>
       <li>Shapefile column names are limited to 10 characters, so <code>stream_order</code> becomes
         <code>stream_ord</code> and <code>tot_da_sqkm</code> becomes <code>tot_da_sqk</code>.</li>
-      <li>The service runs on a small server. Most requests take a few seconds; a whole state or
-        HUC2 region can take a minute or more.</li>
+      <li>The service runs on CIROH's cloud computing resources (AWS). Most downloads start within
+        seconds; a shapefile for a large state or HUC2 region can take up to a minute to prepare.</li>
+      <li><strong>Show these on the map</strong> draws up to a set number of reaches at once (shown
+        under the button), enough for any state or HUC2 region. For larger areas, open the
+        downloaded file in GIS.</li>
+      <li>All-of-CONUS files are prepared in advance and start downloading right away, saved
+        directly by your browser. They are large, so the download time depends on your
+        connection.</li>
     </ul>
   </section>
 

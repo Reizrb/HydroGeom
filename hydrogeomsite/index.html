@@ -342,6 +342,17 @@ details { border-top:0; background:#fff; border-radius:16px; padding:14px 16px; 
   summary { font-size: 15px; }
   pre { font-size: 12.5px; }
   .foot { font-size: 13.5px; }
+  /* partner logos: one white strip, so every logo sits on the background it was made for */
+  .partners {
+    display: flex; align-items: center; justify-content: space-around; gap: 12px;
+    background: #fff; border-radius: 12px; padding: 12px 14px;
+  }
+  .partners a { display: block; border-radius: 6px; transition: opacity .15s; }
+  .partners a:hover { opacity: .8; }
+  .partners a:focus-visible { outline: 2px solid #2E6A8C; outline-offset: 3px; }
+  .partners img { display: block; height: 44px; width: auto; }
+  .partners .ua img { height: 30px; }
+  .partners .sdml img { border-radius: 4px; }
   #show[hidden] + #map-hint { display: none; }
   #map-hint { margin: -4px 0 0; }
 </style>
@@ -437,6 +448,11 @@ details { border-top:0; background:#fff; border-radius:16px; padding:14px 16px; 
     <a href="https://www.hydroshare.org/resource/1a2e115c212f4f4a80660f94339205e6/" target="_blank" rel="noopener">HydroShare</a> (CC-BY-4.0).
     Code: <a href="https://github.com/Reizrb/HydroGeom" target="_blank" rel="noopener">GitHub</a>.
   </p>
+  <nav class="partners" aria-label="Partners">
+    <a href="https://ciroh.ua.edu/" target="_blank" rel="noopener" title="CIROH"><img src="/static/ciroh_logo.png" alt="CIROH" height="44"></a>
+    <a class="sdml" href="https://sdml.ua.edu/" target="_blank" rel="noopener" title="Surface Dynamics Modeling Lab"><img src="/static/sdml_logo.png" alt="Surface Dynamics Modeling Lab" height="44"></a>
+    <a class="ua" href="https://www.ua.edu/" target="_blank" rel="noopener" title="The University of Alabama"><img src="/static/ua_logo.png" alt="The University of Alabama" height="30"></a>
+  </nav>
 </main>
 
 <div class="mapwrap">
@@ -537,9 +553,11 @@ function showArea() {
   $("opt-ids").textContent = reach ? "A list of COMIDs" : "A list of USGS site numbers";
   $("ids").placeholder = reach ? "COMIDs, one per line or comma-separated (e.g. 18223451)"
                                : "USGS site numbers, one per line or comma-separated (e.g. 02465000)";
-  $("format-hint").textContent = format() === "csv"
-    ? "Width and depth values only, no line shapes. Up to 500,000 records per download."
-    : "Includes the " + (reach ? "reach lines" : "gage points") + " for GIS. Up to 50,000 records per download.";
+  const f = format(), what = reach ? "reach lines" : "gage points";
+  $("format-hint").textContent =
+      f === "csv" ? "Width and depth values only, no line shapes. Any area, up to all of CONUS."
+    : f === "geojson" ? `Includes the ${what}, not zipped. Any area, up to all of CONUS` + (reach ? " (about 2.8 GB)." : ".")
+    : `Includes the ${what} for GIS, zipped. Any area, up to all of CONUS` + (reach ? " (about 1 GB)." : ".");
   $("show").hidden = true;
   updateSnippet();
 }
