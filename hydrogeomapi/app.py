@@ -20,10 +20,12 @@ Design notes
 * Polygon queries use a two-step filter: DuckDB bbox pre-filter (cheap, uses the
   precomputed minx/miny/maxx/maxy columns) then a precise shapely intersection on
   the small candidate set. User polygons are reprojected to DATASET_CRS first.
-* A synchronous size guard (MAX_SYNC_ROWS) protects against someone pulling all
-  of CONUS in one request. For CONUS / very large regions you'll want prebuilt
-  static downloads or an async job queue (see the guard for where to branch).
+* A size guard per format (MAX_CSV_ROWS, MAX_SHP_ROWS, MAX_GEOJSON_ROWS, and
+  MAX_MAP_ROWS for the web page's map) counts the
+  matches before any geometry is read. All-of-CONUS files are built once and then
+  reused for every request (see _conus_cached).
 """
+import gzip
 import io
 import shutil
 import json
@@ -63,16 +65,25 @@ def _data_path(filename: str) -> str:
     return f"{REMOTE_BASE.rstrip('/')}/{filename}"
 
 DATASET_CRS = "EPSG:4269"      # NAD83, the NHDPlusV2.1 CRS (both files are built in it)
-MAX_SYNC_ROWS = 50_000         # shapefile / GeoJSON (with line shapes): records per request
-MAX_CSV_ROWS = 3_000_000         # CSV (numbers only, no line shapes): covers every state and HUC2
+MAX_GEOJSON_ROWS = 3_000_000   # GeoJSON download (not zipped): all of CONUS, about 2.2 GB
+# "Show on the map": how many reaches the web page may draw at once. Set CG_MAX_MAP_ROWS
+# on the server (in ~/hydrogeom.env) to change it without a code change.
+MAX_MAP_ROWS = int(os.environ.get("CG_MAX_MAP_ROWS", "50000"))
+# Map lines are simplified (downloads keep full detail): about 20 m for small areas,
+# about 100 m for a whole state or HUC2 region, where a region fits on one screen.
+MAP_SIMPLIFY_DEG = 0.0002
+MAP_SIMPLIFY_DEG_LARGE = 0.001
+MAX_SYNC_ROWS = MAX_MAP_ROWS   # older name, kept for anything that still uses it
+MAX_CSV_ROWS = 3_000_000       # CSV (numbers only, no line shapes): all of CONUS
 
 
-MAX_SHP_ROWS = 3_000_000         # shapefile (line shapes, zipped): most states and HUC2s
+MAX_SHP_ROWS = 3_000_000       # shapefile (line shapes, zipped): all of CONUS
 
 
 def _limit(fmt: str) -> int:
     f = (fmt or "csv").lower()
-    return {"csv": MAX_CSV_ROWS, "shapefile": MAX_SHP_ROWS}.get(f, MAX_SYNC_ROWS)
+    return {"csv": MAX_CSV_ROWS, "shapefile": MAX_SHP_ROWS, "geojson": MAX_GEOJSON_ROWS,
+            "map": MAX_MAP_ROWS}.get(f, MAX_MAP_ROWS)
 ZENODO_URL = "https://zenodo.org/records/19208847"
 
 
@@ -113,7 +124,24 @@ def _available(ds: dict) -> bool:
     return p.startswith("http") or Path(p).exists()
 
 API_VERSION = "1.0.0"
-app = FastAPI(title="HydroGeomAPI", version=API_VERSION)
+API_DESCRIPTION = """
+Machine-learning estimates of bankfull and mean-flow channel width and depth for
+2.7 million NHDPlusV2.1 river reaches and 28,000 USGS gages across CONUS
+([Zarrabi et al., 2025](https://doi.org/10.1029/2024WR037997)).
+
+**Size per request:** CSV and shapefile, any area up to all of CONUS.
+GeoJSON (not zipped, so larger files), any area up to all of CONUS.
+All-of-CONUS files are prepared in advance: get them from `GET /download/conus`.
+
+[Web page](/) | [About the data and how to cite](/about) |
+[Code](https://github.com/Reizrb/HydroGeom) |
+[Full dataset on Zenodo](https://doi.org/10.5281/zenodo.19208847)
+
+Hosted on CIROH cloud computing resources (AWS). Funding for this project was provided by
+NOAA, awarded to CIROH through the Cooperative Agreement with The University of Alabama
+(NA22NWS4320003).
+"""
+app = FastAPI(title="HydroGeomAPI", version=API_VERSION, description=API_DESCRIPTION)
 # allow the browser map/menu frontend to call this API
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
@@ -141,8 +169,8 @@ def home():
 # files (their layout, which parts hold which HUCs) is cached between requests
 # instead of being downloaded again from Hugging Face every time.
 _DB = duckdb.connect()
-_DB.execute("PRAGMA threads=2")      # the free server has a tenth of a CPU; leave room for /health
-_DB.execute("SET memory_limit = '2GB'")        # the free server has 512 MB in total
+_DB.execute("PRAGMA threads=2")      # CIROH AWS server: 2 vCPUs
+_DB.execute("SET memory_limit = '2GB'")    # CIROH AWS server: 4 GB in total
 _DB.execute(f"SET temp_directory = '{tempfile.gettempdir()}/duckdb_spill'")
 for _setting in ("SET enable_object_cache = true",
                  "SET enable_http_metadata_cache = true"):
@@ -192,6 +220,8 @@ class ExtractRequest(BaseModel):
     dataset: str = Field("reach", description="reach | gage")
     request_type: str = Field(..., description="conus | ids | comids | state | huc2 | huc8 | polygon")
     format: str = Field("csv", description="csv | shapefile | geojson")
+    for_map: bool = Field(False, description="Set by the web page when drawing on its map: "
+                          "GeoJSON is then limited to 50,000 records")
     # one of these is used depending on request_type:
     ids: list[int | str] | None = Field(None, description="COMIDs (reach) or USGS site numbers (gage, as text)")
     comids: list[int] | None = Field(None, description="kept for older clients; same as ids")
@@ -238,7 +268,14 @@ def _user_polygon_to_dataset_crs(geojson_geom: dict):
 
 
 # ------------------------------------------------------------------ formatting
-def _stream(ds: dict, query: tuple, fmt: str, name: str = "reaches"):
+def _map_cols(ds: dict) -> str:
+    """Only what the map's popups use, with values rounded to centimeters."""
+    ids = ["comid", "stream_order"] if ds["id_col"] == "comid" else ["site_no", "station_nm"]
+    return ", ".join(ids + [f"round({a}, 2) AS {a}" for a in GEOM_ATTRS])
+
+
+def _stream(ds: dict, query: tuple, fmt: str, name: str = "reaches", for_map: bool = False,
+            large_area: bool = False):
     """Write the result straight to a file with DuckDB (low memory), then send it."""
     where_sql, params = query
     fmt = fmt.lower()
@@ -256,10 +293,16 @@ def _stream(ds: dict, query: tuple, fmt: str, name: str = "reaches"):
             media = "text/csv"
         elif fmt == "geojson":
             out = Path(td) / f"{name}.geojson"
+            if for_map:    # fewer columns, simplified lines, fewer decimals
+                tol, prec = (MAP_SIMPLIFY_DEG_LARGE, 4) if large_area else (MAP_SIMPLIFY_DEG, 5)
+                sel = _map_cols(ds)
+                geom = f"ST_SimplifyPreserveTopology(ST_GeomFromWKB(geom_wkb), {tol})"
+            else:
+                sel, prec, geom = cols, 6, "ST_GeomFromWKB(geom_wkb)"
             n = con().execute(
-                f"COPY (SELECT {cols}, ST_GeomFromWKB(geom_wkb) AS geom {src}) "
+                f"COPY (SELECT {sel}, {geom} AS geom {src}) "
                 f"TO '{out}' (FORMAT GDAL, DRIVER 'GeoJSON', SRS 'EPSG:4269', "
-                f"LAYER_CREATION_OPTIONS 'COORDINATE_PRECISION=6')", params).fetchone()[0]
+                f"LAYER_CREATION_OPTIONS 'COORDINATE_PRECISION={prec}')", params).fetchone()[0]
             media = "application/geo+json"
         elif fmt == "shapefile":
             shp_dir = Path(td) / "shp"; shp_dir.mkdir()
@@ -280,6 +323,14 @@ def _stream(ds: dict, query: tuple, fmt: str, name: str = "reaches"):
     if not n:
         shutil.rmtree(td, ignore_errors=True)
         raise HTTPException(404, "No records matched the query.")
+    if for_map:
+        # map data is sent compressed (about 5 times smaller); browsers unpack it automatically
+        gz = out.with_name(out.name + ".gz")
+        with open(out, "rb") as fin, gzip.open(gz, "wb", compresslevel=5) as fout:
+            shutil.copyfileobj(fin, fout, 1 << 20)
+        out.unlink()
+        return FileResponse(gz, media_type=media, filename=out.name, background=cleanup,
+                            headers={"Content-Encoding": "gzip"})
     return FileResponse(out, media_type=media, filename=out.name, background=cleanup)
 
 
@@ -313,9 +364,15 @@ def _too_big(err: TooBig, what: str) -> HTTPException:
     """413 answer that tells the user where to get large areas instead."""
     msg = (f"{what} has {err.n:,} records, more than the {err.limit:,} this API returns "
            f"in one {err.fmt.upper() if err.fmt != 'shapefile' else 'shapefile'} download. ")
-    if err.fmt.lower() != "csv" and err.n <= MAX_CSV_ROWS:
-        msg += ("Choose CSV to get the width and depth values for this whole area "
-                f"(up to {MAX_CSV_ROWS:,} records), or ask for a smaller area for line shapes.")
+    fmt = err.fmt.lower()
+    if fmt == "map":
+        msg = (f"{what} has {err.n:,} records, more than the {err.limit:,} the map can show "
+               "at once. Try a smaller area, like a HUC8, or download the file instead.")
+    elif fmt == "geojson" and err.n <= MAX_SHP_ROWS:
+        msg += ("Choose Shapefile to get the line shapes for this whole area, "
+                "or CSV for the width and depth values only.")
+    elif fmt != "csv" and err.n <= MAX_CSV_ROWS:
+        msg += "Choose CSV to get the width and depth values for this whole area."
     else:
         msg += "Ask for a smaller area, or download the full dataset from Zenodo."
     return HTTPException(413, {"message": msg, "records": err.n, "limit": err.limit,
@@ -337,7 +394,10 @@ def _extract(req: ExtractRequest):
     ds = _ds(req.dataset)
     _check_format(req.format)
     rt = req.request_type.lower()
+    size_fmt = "map" if req.for_map and req.format.lower() == "geojson" else req.format
     if rt == "conus":
+        if size_fmt == "map":
+            _check_size(ds, "", [], size_fmt)
         return _conus_cached(ds, req.format, _outname(req.dataset))
     elif rt in ("ids", "comids"):
         raw = req.ids or ([str(c) for c in req.comids] if req.comids else None)
@@ -349,28 +409,29 @@ def _extract(req: ExtractRequest):
             raise HTTPException(400, f"ids for the {req.dataset} dataset must be "
                                      f"{ds['id_type'].__name__} values")
         placeholders = ", ".join("?" * len(ids))
-        gdf = _fetch_by_filter(ds, f"{ds['id_col']} IN ({placeholders})", ids, req.format)
+        gdf = _fetch_by_filter(ds, f"{ds['id_col']} IN ({placeholders})", ids, size_fmt)
     elif rt == "state":
         if not req.state:
             raise HTTPException(400, "state is required for request_type=state")
-        gdf = _fetch_by_filter(ds, "state = ?", [req.state.upper()], req.format)
+        gdf = _fetch_by_filter(ds, "state = ?", [req.state.upper()], size_fmt)
     elif rt == "huc2":
         if not req.huc2:
             raise HTTPException(400, "huc2 is required for request_type=huc2")
-        gdf = _fetch_by_filter(ds, "huc2 = ?", [req.huc2.zfill(2)], req.format)
+        gdf = _fetch_by_filter(ds, "huc2 = ?", [req.huc2.zfill(2)], size_fmt)
     elif rt == "huc8":
         if not req.huc8:
             raise HTTPException(400, "huc8 is required for request_type=huc8")
-        gdf = _fetch_by_filter(ds, "huc8 = ?", [req.huc8.zfill(8)], req.format)
+        gdf = _fetch_by_filter(ds, "huc8 = ?", [req.huc8.zfill(8)], size_fmt)
     elif rt == "polygon":
         if not req.polygon:
             raise HTTPException(400, "polygon (GeoJSON) is required for request_type=polygon")
         geom = _user_polygon_to_dataset_crs(req.polygon)
-        gdf = _fetch_by_polygon(ds, geom, req.format)
+        gdf = _fetch_by_polygon(ds, geom, size_fmt)
     else:
         raise HTTPException(400, f"Unknown request_type '{req.request_type}'")
 
-    return _stream(ds, gdf, req.format, _outname(req.dataset))
+    return _stream(ds, gdf, req.format, _outname(req.dataset), for_map=(size_fmt == "map"),
+                   large_area=rt in ("state", "huc2"))
 
 
 def _check_format(fmt: str):
@@ -387,6 +448,7 @@ async def extract_shapefile(
     file: UploadFile = File(..., description="zipped shapefile (.shp/.shx/.dbf/.prj)"),
     format: str = Form("csv"),
     dataset: str = Form("reach"),
+    for_map: bool = Form(False),
 ):
     """Map interface: uploaded polygon shapefile. Reprojects to dataset CRS,
     then intersects. Accepts a .zip containing the shapefile parts."""
@@ -411,10 +473,30 @@ async def extract_shapefile(
         geom = poly.union_all()            # merge all polygon features into one mask
 
     try:
-        gdf = _fetch_by_polygon(ds, geom, format)
+        size_fmt = "map" if for_map and format.lower() == "geojson" else format
+        gdf = _fetch_by_polygon(ds, geom, size_fmt)
     except TooBig as err:
         raise _too_big(err, "This polygon")
-    return _stream(ds, gdf, format, _outname(dataset))
+    return _stream(ds, gdf, format, _outname(dataset), for_map=(size_fmt == "map"))
+
+
+@app.get("/download/conus")
+def download_conus(dataset: str = "reach", format: str = "csv"):
+    """All of CONUS as one file, prepared in advance. A plain link (GET), so browsers
+    save it straight to disk instead of holding it in memory, even at 2 GB."""
+    ds = _ds(dataset)
+    _check_format(format)
+    try:
+        return _conus_cached(ds, format, _outname(dataset))
+    except TooBig as err:
+        raise _too_big(err, "All of CONUS")
+
+
+@app.get("/limits")
+def limits():
+    """Most records per request for each format, and for drawing on the web page's map."""
+    return {"csv": MAX_CSV_ROWS, "shapefile": MAX_SHP_ROWS, "geojson": MAX_GEOJSON_ROWS,
+            "map": MAX_MAP_ROWS}
 
 
 _COUNTS: dict = {}
