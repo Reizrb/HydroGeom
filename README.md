@@ -4,7 +4,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23520185.svg)](https://doi.org/10.5281/zenodo.23520185)
 
-**Live at: https://conus-channel-geometry.onrender.com**
+**Live at: https://hydrogeom.ciroh.org**
 
 A web page, an API, and a Python package for getting
 machine-learning estimates of bankfull and mean-flow channel width and depth for
@@ -36,11 +36,11 @@ repository.
 
 ## Using the web page
 
-Open https://conus-channel-geometry.onrender.com and:
+Open https://hydrogeom.ciroh.org and:
 
 1. Choose **River reaches** or **USGS gages**.
 2. Choose where: a HUC8 watershed, a state, a HUC2 region, a list of IDs, an area
-   you draw on the map, a shapefile you upload, or all of CONUS (gages only).
+   you draw on the map, a shapefile you upload, or all of CONUS.
 3. Choose a format and click **Download data**.
 4. Click **Show these on the map** to see the results. Click a reach or gage for
    its width and depth.
@@ -64,14 +64,21 @@ satellite imagery, and the page has light and dark themes.
 
 ### Formats and limits
 
-| Format    | Contents                                  | Records per download |
-|-----------|-------------------------------------------|----------------------|
-| CSV       | Values only, no line shapes               | up to 500,000        |
-| GeoJSON   | Values plus reach lines or gage points    | up to 50,000         |
-| Shapefile | Values plus reach lines or gage points (zipped) | up to 50,000   |
+| Format    | Contents                                        | Area per download |
+|-----------|-------------------------------------------------|-------------------|
+| CSV       | Values only, no line shapes                     | Any area, up to all of CONUS (about 220 MB for all reaches) |
+| GeoJSON   | Values plus reach lines or gage points          | Any area, up to all of CONUS (about 2.8 GB for all reaches; not zipped) |
+| Shapefile | Values plus reach lines or gage points (zipped) | Any area, up to all of CONUS (about 1 GB for all reaches) |
 
-A CSV covers any single state or HUC2 region. For all of CONUS, download the full
-dataset from [Zenodo](https://doi.org/10.5281/zenodo.19208847).
+All-of-CONUS files are prepared in advance and start downloading right away. You can
+also get them with a plain link, for example
+`https://hydrogeom.ciroh.org/download/conus?dataset=reach&format=shapefile` (use
+`format=csv` or `geojson`, and `dataset=gage` for gages). The archived release, which
+is the version to cite, is on [Zenodo](https://doi.org/10.5281/zenodo.19208847).
+
+**Show these on the map** draws up to a set number of records at once (shown under
+the button; `/limits` reports it), enough for any state or HUC2 region. For larger
+areas, open the downloaded file in GIS.
 
 ### Good to know
 
@@ -86,8 +93,8 @@ dataset from [Zenodo](https://doi.org/10.5281/zenodo.19208847).
 - **Shapefile column names** are limited to 10 characters, so `stream_order`
   becomes `stream_ord` and `tot_da_sqkm` becomes `tot_da_sqk`. CSV and GeoJSON
   keep the full names.
-- **Speed:** the service currently runs on a small free server. Most requests take
-  a few seconds, and a whole state or HUC2 region can take a minute or more.
+- **Speed:** most downloads start within seconds. A shapefile or GeoJSON for a large
+  state or HUC2 region can take up to a minute to prepare.
 
 ## Using the Python package (HydroGeomKit)
 
@@ -118,7 +125,7 @@ reaches = get_channel_geometry(huc8="03160112")
 # Specific reaches by COMID
 reaches = get_channel_geometry(comids=[18223451, 721640])
 
-# A whole state or HUC2 region (values only, up to 500,000 reaches)
+# A whole state or HUC2 region (values only)
 alabama = get_channel_geometry(state="AL")
 
 # USGS gages, by site number (as text, to keep leading zeros)
@@ -134,14 +141,18 @@ reaches = get_channel_geometry(polygon=basin, geometry=True)
 ```
 
 Choose **one** way to select the area: `comids`, `site_nos`, `state`, `huc2`,
-`huc8`, `polygon`, or `conus=True` (gages only). The columns are the same as in
+`huc8`, `polygon`, or `conus=True` (everything). The columns are the same as in
 [What you get](#what-you-get). Codes are kept as text, and records without a
 prediction have empty (NaN) width and depth.
 
-| `geometry=`     | Returns                              | Records per call |
-|-----------------|--------------------------------------|------------------|
-| `False` (default) | pandas DataFrame, values only      | up to 500,000    |
-| `True`          | GeoDataFrame with lines or points (EPSG:4269) | up to 50,000 |
+| `geometry=`       | Returns                                       | Area per call |
+|-------------------|-----------------------------------------------|---------------|
+| `False` (default) | pandas DataFrame, values only                 | Any area, up to all of CONUS |
+| `True`            | GeoDataFrame with lines or points (EPSG:4269) | Any area, up to all of CONUS |
+
+With `geometry=True`, a whole state or more is a large download that needs plenty of
+memory (all reaches is about 2.8 GB). For all of CONUS with line shapes, download the
+shapefile from the web page instead.
 
 ### Compute hydraulic geometry
 
@@ -246,7 +257,7 @@ import io
 import pandas as pd
 import requests
 
-API = "https://conus-channel-geometry.onrender.com/extract"
+API = "https://hydrogeom.ciroh.org/extract"
 
 # All reaches in one HUC8, as a table
 r = requests.post(API, json={"request_type": "huc8", "huc8": "03160112", "format": "csv"})
@@ -270,7 +281,7 @@ gages = gpd.read_file(io.BytesIO(r.content))
 library(httr2)
 library(readr)
 
-api <- "https://conus-channel-geometry.onrender.com/extract"
+api <- "https://hydrogeom.ciroh.org/extract"
 
 resp <- request(api) |>
   req_body_json(list(request_type = "huc8", huc8 = "03160112", format = "csv")) |>
@@ -283,7 +294,7 @@ reaches <- read_csv(resp_body_string(resp),
 ### Command line
 
 ```bash
-curl -X POST https://conus-channel-geometry.onrender.com/extract \
+curl -X POST https://hydrogeom.ciroh.org/extract \
   -H "Content-Type: application/json" \
   -d '{"request_type": "huc8", "huc8": "03160112", "format": "shapefile"}' \
   -o reaches.zip
@@ -295,7 +306,7 @@ Send a zipped shapefile (with its `.prj` file) to `POST /extract/shapefile` as a
 form upload, with `format` and `dataset` as form fields:
 
 ```bash
-curl -X POST https://conus-channel-geometry.onrender.com/extract/shapefile \
+curl -X POST https://hydrogeom.ciroh.org/extract/shapefile \
   -F "file=@my_area.zip" -F "format=csv" -F "dataset=reach" -o reaches.csv
 ```
 
@@ -305,6 +316,8 @@ curl -X POST https://conus-channel-geometry.onrender.com/extract/shapefile \
 |-----------|------------------------------------------------------------|
 | `/docs`   | Interactive API documentation, where you can try requests  |
 | `/status` | API version, number of reaches and gages available, and the data source |
+| `/limits` | Most records per request for each format, and for the web page's map |
+| `/download/conus?dataset=reach&format=csv` | All of CONUS as one prepared file (`csv`, `geojson`, or `shapefile`) |
 | `/health` | A quick check that the service is running                  |
 
 ### Errors
@@ -340,18 +353,24 @@ If you use the channel shape parameters, please also cite:
 ## How it works
 
 The API is a Python [FastAPI](https://fastapi.tiangolo.com/) application. The data
-is stored as two GeoParquet files (`reaches.parquet` and `gages.parquet`) in a
-[Hugging Face dataset](https://huggingface.co/datasets/Reizrb/bankfull-meanflow-conus).
+is stored as two GeoParquet files (`reaches.parquet` and `gages.parquet`). The live
+service keeps them on its server's disk, with a copy in CIROH's S3 storage. They are
+also published as a
+[Hugging Face dataset](https://huggingface.co/datasets/Reizrb/bankfull-meanflow-conus),
+which the API reads from when no local files are present.
 [DuckDB](https://duckdb.org/) reads only the parts of those files that a request
 needs, and writes the CSV, GeoJSON, or shapefile directly, so large downloads use
 little memory. The files are sorted by HUC8, which keeps regional requests fast.
 The web page uses [Leaflet](https://leafletjs.com/) with basemaps from USGS The
 National Map, OpenTopoMap, and Esri.
 
-The service is packaged as a Docker container (see the `Dockerfile`) and currently runs on
-[Render](https://render.com/). To point it at another storage location (such as
-an S3 bucket), set the `CG_DATA_URL` environment variable to the folder that holds
-the two Parquet files.
+The service runs on CIROH's cloud computing resources (AWS): one EC2 server runs the
+Docker container (see the `Dockerfile`), with [Caddy](https://caddyserver.com/) in front
+of it for HTTPS at https://hydrogeom.ciroh.org. All-of-CONUS downloads and the map data
+for every state and HUC2 region are built once and saved on the server.
+`deploy/update.sh` updates the server from this repository, and `deploy/caddy.sh`
+starts Caddy. To point the API at another storage location, set the `CG_DATA_URL`
+environment variable to the folder that holds the two Parquet files.
 
 The Docker container holds HydroGeomAPI and HydroGeomSite. HydroGeomKit is a separate
 client: it calls the same API over the internet and is not part of the container.
@@ -402,6 +421,7 @@ fake reach file (run it inside `hydrogeomapi/`).
 | `hydrogeomkit/`              | HydroGeomKit: the Python package, with its tests in `tests/`   |
 | `pyproject.toml`             | Package settings used by `pip install`                         |
 | `Dockerfile`                 | Builds the container (API + web page) used for hosting         |
+| `deploy/`                    | Server scripts: `update.sh` (update and restart), `caddy.sh` (HTTPS) |
 | `assets/`                    | Images used in this README                                     |
 
 ## Funding
