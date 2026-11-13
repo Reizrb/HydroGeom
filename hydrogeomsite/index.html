@@ -280,13 +280,18 @@ details { border-top:0; background:#fff; border-radius:16px; padding:14px 16px; 
   html[data-theme=dark] .map-note { background: rgba(20,30,43,.95); color: #E3ECF5; }
   html[data-theme=dark] #map { background: #121B26; }
   html[data-theme=dark] .leaflet-tile-pane { filter: brightness(.82) contrast(1.05); }
+  /* background-color only: the draw buttons' icons are background images, which the
+     "background" shorthand would erase */
   html[data-theme=dark] .leaflet-bar a, html[data-theme=dark] .leaflet-control-layers {
-    background: #1E2C3E; color: #E3ECF5; border-color: #34475E; }
-  html[data-theme=dark] .leaflet-bar a:hover { background: #2A3B51; }
+    background-color: #1E2C3E; color: #E3ECF5; border-color: #34475E; }
+  html[data-theme=dark] .leaflet-bar a:hover { background-color: #2A3B51; }
   html[data-theme=dark] .leaflet-control-attribution { background: rgba(20,30,43,.85); color: #B5C3D2; }
   html[data-theme=dark] .leaflet-control-attribution a { color: #A9CCE0; }
   html[data-theme=dark] .leaflet-popup-content-wrapper, html[data-theme=dark] .leaflet-popup-tip { background: #1E2C3E; color: #E3ECF5; }
-  html[data-theme=dark] .leaflet-draw-toolbar a { filter: invert(.9) hue-rotate(180deg); background-color: #E1D3C1; }
+  /* the draw icons are dark images, so these buttons are inverted; the colors below come
+     out as the same navy as the other map buttons (#1E2C3E, and #2A3B51 on hover) */
+  html[data-theme=dark] .leaflet-draw-toolbar a { filter: invert(.9) hue-rotate(180deg); background-color: #DBECFF; }
+  html[data-theme=dark] .leaflet-draw-toolbar a:hover { background-color: #C5DAF6; }
   @media (max-width: 860px) { html[data-theme=dark] .panel { border-bottom-color: #34475E; } }
 
   /* new-logo accents */
@@ -642,7 +647,7 @@ fetch("/limits").then(r => r.json()).then(l => {
 
 $("go").addEventListener("click", async () => {
   if ($("area").value === "conus") {
-    // all-of-CONUS files are large (up to 2.2 GB): let the browser save them straight to disk
+    // all-of-CONUS files are large (up to 2.8 GB): let the browser save them straight to disk
     $("show").hidden = true;
     window.location.href = `/download/conus?dataset=${dataset()}&format=${format()}`;
     setStatus("Your download has started. Follow its progress in your browser's downloads.", "ok");
