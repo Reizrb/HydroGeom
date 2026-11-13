@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the article below."
-title: "HydroGeom"
+title: "HydroGeom: A Web Application, API, and Python Package for Retrieving Hydraulic Geometry across CONUS"
 type: software
 authors:
   - family-names: Zarrabi
