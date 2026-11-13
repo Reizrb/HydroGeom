@@ -12,7 +12,7 @@ import requests
 
 DEFAULT_URL = os.environ.get("HYDROGEOMKIT_URL",
                              os.environ.get("CONUS_CHANNEL_GEOMETRY_URL",
-                                            "https://conus-channel-geometry.onrender.com"))
+                                            "https://hydrogeom.ciroh.org"))
 
 # Columns that are codes, not numbers: keep them as text so leading zeros survive.
 _TEXT_COLUMNS = ["site_no", "station_nm", "reachcode", "state", "huc2", "huc8"]
@@ -60,16 +60,18 @@ def get_channel_geometry(
     - ``huc8``: eight-digit HUC8 watershed, e.g. ``"03160112"``
     - ``polygon``: a shapely geometry (longitude/latitude), a GeoDataFrame or GeoSeries
       in any coordinate system, or a GeoJSON geometry dictionary
-    - ``conus=True``: everything (gages only; for all reaches use the Zenodo dataset)
+    - ``conus=True``: everything (all of CONUS)
 
     Parameters
     ----------
     dataset : "reach" or "gage"
         River reaches (default) or USGS gages. Passing ``site_nos`` selects gages.
     geometry : bool
-        False (default): return a pandas DataFrame with the values only, up to
-        500,000 records. True: return a GeoDataFrame with the reach lines or gage
-        points (needs geopandas), up to 50,000 records.
+        False (default): return a pandas DataFrame with the values only, for any
+        area up to all of CONUS. True: return a GeoDataFrame with the reach lines or
+        gage points (needs geopandas). A whole state or more is a large download
+        (all reaches is about 2.8 GB); for all of CONUS with line shapes, download the
+        shapefile from the web page instead.
     base_url : str
         The API address. Set the ``HYDROGEOMKIT_URL`` environment variable
         to change the default.

@@ -4,7 +4,7 @@ HydroGeomKit (hydrogeomkit)
 
 Get machine-learning estimates of bankfull and mean-flow channel width and depth
 for NHDPlusV2.1 reaches and USGS gages across the conterminous United States,
-from the Channel Geometry API (https://conus-channel-geometry.onrender.com).
+from the Channel Geometry API (https://hydrogeom.ciroh.org).
 
     >>> from hydrogeomkit import get_channel_geometry, xsec_area
     >>> df = get_channel_geometry(huc8="03160112")
@@ -30,7 +30,7 @@ from .api import (
     status,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = ["get_channel_geometry", "xsec_area", "wetted_perimeter", "hydraulic_radius",
            "cross_section", "status", "ChannelGeometryError", "TooManyRecords",
            "DEFAULT_URL", "__version__"]
